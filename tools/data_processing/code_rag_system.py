@@ -534,11 +534,11 @@ class CodeRAGSystem:
         return results
     
     def ask_question(self, question: str) -> Dict[str, Any]:
-        """Responder pregunta sobre el código."""
+        """Responder pregunta sobre el código con scoring mejorado."""
         print(f"❓ Pregunta: {question}")
         
-        # Buscar chunks relevantes
-        results = self.search_code(question, k=8)
+        # Buscar chunks relevantes con más resultados
+        results = self.search_code(question, k=15)
         
         if not results:
             return {
@@ -547,13 +547,18 @@ class CodeRAGSystem:
                 'confidence': 0.0
             }
         
+        # MEJORA 1: Re-scoring inteligente basado en tipo y relevancia
+        enhanced_results = self._enhance_scoring(question, results)
+        
+        # MEJORA 2: Filtrar por relevancia mejorada y diversidad
+        filtered_results = self._filter_and_diversify(enhanced_results)
+        
         # Preparar contexto
         context_parts = []
         sources = []
         
-        for chunk, score in results:
-            if score > 0.3:  # Umbral de relevancia
-                context_parts.append(f"""
+        for chunk, score in filtered_results:
+            context_parts.append(f"""
 ## {chunk.chunk_type.title()}: {chunk.name}
 **Archivo:** {chunk.file_path} (líneas {chunk.line_start}-{chunk.line_end})
 **Complejidad:** {chunk.complexity}
@@ -562,13 +567,13 @@ class CodeRAGSystem:
 {chunk.content}
 ```
 """)
-                sources.append({
-                    'file': chunk.file_path,
-                    'name': chunk.name,
-                    'type': chunk.chunk_type,
-                    'lines': f"{chunk.line_start}-{chunk.line_end}",
-                    'score': score
-                })
+            sources.append({
+                'file': chunk.file_path,
+                'name': chunk.name,
+                'type': chunk.chunk_type,
+                'lines': f"{chunk.line_start}-{chunk.line_end}",
+                'score': score
+            })
         
         context = '\n'.join(context_parts)
         
@@ -578,9 +583,100 @@ class CodeRAGSystem:
         return {
             'answer': answer,
             'sources': sources,
-            'confidence': max(score for _, score in results) if results else 0.0,
+            'confidence': max(score for _, score in filtered_results) if filtered_results else 0.0,
             'context_length': len(context)
         }
+    
+    def _enhance_scoring(self, question: str, results: List[Tuple[CodeChunk, float]]) -> List[Tuple[CodeChunk, float]]:
+        """Mejorar scoring basado en tipo de chunk y relevancia de contenido."""
+        question_lower = question.lower()
+        enhanced_results = []
+        
+        for chunk, base_score in results:
+            # Calcular score mejorado
+            enhanced_score = base_score
+            
+            # BOOST 1: Priorizar funciones sobre comentarios
+            if chunk.chunk_type == 'function':
+                enhanced_score *= 1.5  # +50% para funciones
+            elif chunk.chunk_type == 'class':
+                enhanced_score *= 1.3  # +30% para clases
+            elif chunk.chunk_type == 'comment':
+                enhanced_score *= 0.7  # -30% para comentarios generales
+            
+            # BOOST 2: Match exacto de nombres en la pregunta
+            chunk_name_lower = chunk.name.lower()
+            if any(word in chunk_name_lower for word in question_lower.split()):
+                enhanced_score *= 1.4  # +40% para matches de nombre
+            
+            # BOOST 3: Match de palabras clave específicas en contenido
+            content_lower = chunk.content.lower()
+            for word in question_lower.split():
+                if len(word) > 3 and word in content_lower:
+                    # Más boost si la palabra aparece en el nombre de función
+                    if word in chunk_name_lower:
+                        enhanced_score *= 1.2
+                    else:
+                        enhanced_score *= 1.1
+            
+            # BOOST 4: Penalizar comentarios muy cortos o imports
+            if chunk.chunk_type == 'comment' and len(chunk.content) < 50:
+                enhanced_score *= 0.5
+            elif chunk.chunk_type == 'import':
+                enhanced_score *= 0.6
+            
+            # BOOST 5: Priorizar archivos específicos mencionados en la pregunta
+            for word in question_lower.split():
+                if word in chunk.file_path.lower():
+                    enhanced_score *= 1.3
+            
+            enhanced_results.append((chunk, enhanced_score))
+        
+        # Ordenar por score mejorado
+        enhanced_results.sort(key=lambda x: x[1], reverse=True)
+        return enhanced_results
+    
+    def _filter_and_diversify(self, results: List[Tuple[CodeChunk, float]]) -> List[Tuple[CodeChunk, float]]:
+        """Filtrar resultados y diversificar por tipos y archivos."""
+        if not results:
+            return []
+        
+        filtered = []
+        seen_files = set()
+        type_counts = {'function': 0, 'class': 0, 'comment': 0, 'import': 0}
+        
+        # Umbral dinámico basado en el mejor score
+        best_score = results[0][1]
+        min_threshold = max(0.4, best_score * 0.6)  # Al menos 60% del mejor score
+        
+        for chunk, score in results:
+            # Filtro de threshold
+            if score < min_threshold:
+                continue
+            
+            # Diversificar tipos (limite por tipo)
+            chunk_type = chunk.chunk_type
+            if chunk_type == 'comment' and type_counts['comment'] >= 2:
+                continue  # Máximo 2 comentarios
+            if chunk_type == 'import' and type_counts['import'] >= 1:
+                continue  # Máximo 1 import
+            
+            # Diversificar archivos (máximo 3 del mismo archivo)
+            file_key = chunk.file_path.split('/')[-1]  # Solo nombre de archivo
+            if file_key in seen_files:
+                file_count = sum(1 for c, _ in filtered if c.file_path.split('/')[-1] == file_key)
+                if file_count >= 3:
+                    continue
+            
+            filtered.append((chunk, score))
+            seen_files.add(file_key)
+            type_counts[chunk_type] += 1
+            
+            # Límite total de resultados
+            if len(filtered) >= 8:
+                break
+        
+        return filtered
     
     def _generate_simple_answer(self, question: str, context: str, sources: List[Dict]) -> str:
         """Generar respuesta simple basada en el contexto."""

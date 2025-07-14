@@ -436,6 +436,27 @@
             position: relative;
             height: 300px;
         }
+        
+        .summary-section {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+        
+        .category-card.summary::before {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+        }
+        
+        .last-update {
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
     </style>
 </head>
 <body>
@@ -475,6 +496,60 @@
         </div>
         
         <div id="messages"></div>
+        
+        <!-- Resumen General -->
+        <div class="summary-section" id="summarySection">
+            <div class="chart-title">📊 Resumen General del Proyecto</div>
+            <div class="category-grid">
+                <div class="category-card summary">
+                    <div class="category-title">📁 Archivos</div>
+                    <div class="category-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalFiles">0</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="category-card summary">
+                    <div class="category-title">⚙️ Funciones</div>
+                    <div class="category-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalFunctions">0</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="orphanFunctions">0</div>
+                            <div class="stat-label">Huérfanas</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="category-card summary">
+                    <div class="category-title">📄 Líneas</div>
+                    <div class="category-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="totalLines">0</div>
+                            <div class="stat-label">Total</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="category-card summary">
+                    <div class="category-title">📈 Calidad</div>
+                    <div class="category-stats">
+                        <div class="stat-item">
+                            <div class="stat-value" id="maintainabilityScore">0</div>
+                            <div class="stat-label">Mantenibilidad</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="complexityAverage">0</div>
+                            <div class="stat-label">Complejidad</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="last-update">
+                Última actualización: <span id="lastUpdate">N/A</span>
+            </div>
+        </div>
         
         <!-- Sección RAG con filtros -->
         <div class="rag-section hidden" id="ragSection">
@@ -552,6 +627,7 @@
         async function loadDashboard() {
             try {
                 await Promise.all([
+                    loadSummaryData(),
                     loadCategoryBreakdown(),
                     loadCategoryChart()
                 ]);
@@ -559,6 +635,37 @@
             } catch (error) {
                 console.error('Error loading dashboard:', error);
                 showMessage('Error cargando dashboard: ' + error.message, 'error');
+            }
+        }
+        
+        async function loadSummaryData() {
+            try {
+                const response = await fetch('/api/summary');
+                if (!response.ok) throw new Error('Error cargando resumen');
+                const data = await response.json();
+                
+                // Actualizar elementos del resumen principal
+                const updateElement = (id, value) => {
+                    const element = document.getElementById(id);
+                    if (element) {
+                        element.textContent = value || '0';
+                    }
+                };
+                
+                // Actualizar todos los campos principales
+                updateElement('totalFiles', data.total_files);
+                updateElement('totalFunctions', data.total_functions);
+                updateElement('totalLines', data.total_lines);
+                updateElement('orphanFunctions', data.orphan_functions);
+                updateElement('maintainabilityScore', data.maintainability_score);
+                updateElement('complexityAverage', data.complexity_average);
+                updateElement('lastUpdate', data.last_update);
+                
+                console.log('Summary data loaded:', data);
+                
+            } catch (error) {
+                console.error('Error loading summary:', error);
+                showMessage('Error cargando resumen: ' + error.message, 'error');
             }
         }
         
@@ -795,26 +902,32 @@
             responseDiv.innerHTML = '<div class="loading">🤖 Analizando código categorizado...</div>';
             
             try {
-                const response = await fetch('/api/rag-query', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ question: question })
-                });
+                const response = await fetch(`/api/ask-code?q=${encodeURIComponent(question)}`);
                 
                 if (!response.ok) throw new Error('Error en consulta RAG');
                 
                 const result = await response.json();
+                
+                let sourcesHtml = '';
+                if (result.sources && result.sources.length > 0) {
+                    sourcesHtml = '<h5>📚 Fuentes relevantes:</h5><ul>';
+                    result.sources.slice(0, 3).forEach(source => {
+                        const fileName = source.file.split('/').pop();
+                        sourcesHtml += `<li><strong>${fileName}</strong> (líneas ${source.lines}) - Score: ${(source.score * 100).toFixed(1)}%</li>`;
+                    });
+                    sourcesHtml += '</ul>';
+                } else {
+                    sourcesHtml = '<p>No se encontraron fuentes específicas.</p>';
+                }
                 
                 responseDiv.innerHTML = `
                     <div class="success">
                         <h4>🤖 Respuesta del Asistente</h4>
                         <p>${result.answer}</p>
                         <hr style="margin: 15px 0;">
-                        <h5>📚 Contexto relevante:</h5>
-                        <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin-top: 10px;">
-                            ${result.context || 'No se encontró contexto específico'}
+                        ${sourcesHtml}
+                        <div style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                            Confianza: ${(result.confidence * 100).toFixed(1)}% | Contexto: ${result.context_length} chars
                         </div>
                     </div>
                 `;

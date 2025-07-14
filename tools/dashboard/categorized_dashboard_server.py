@@ -74,17 +74,17 @@ class DashboardDataProvider:
         return self._god_class_refactor
     
     def get_summary_data(self) -> Dict[str, Any]:
-        """Obtener datos de resumen."""
+        """Obtiene los datos de resumen del archivo de métricas."""
         if not self.metrics_file.exists():
-            return self._generate_quick_summary()
-        
+            # Devuelve una estructura que coincide con los datos reales para evitar errores
+            return {"project_metrics": {}, "timestamp": "N/A"}
         try:
             with open(self.metrics_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return data.get('project_metrics', {})
-        except Exception as e:
-            print(f"Error cargando métricas: {e}")
-            return self._generate_quick_summary()
+            return data
+        except (json.JSONDecodeError, Exception) as e:
+            print(f"Error cargando o parseando métricas: {e}")
+            return {"project_metrics": {}, "timestamp": "N/A"}
     
     def get_smart_analysis_data(self) -> Dict[str, Any]:
         """Obtener análisis inteligente."""
@@ -94,9 +94,40 @@ class DashboardDataProvider:
         try:
             categorized = self.smart_analyzer.analyze_project()
             summary = self.smart_analyzer.get_orphan_summary()
+            
+            # Convertir objetos a diccionarios serializables
+            def serialize_object(obj):
+                """Serializar objetos complejos a diccionarios."""
+                if hasattr(obj, '__dict__'):
+                    # Para objetos complejos, extraer atributos básicos
+                    result = {}
+                    for attr_name in dir(obj):
+                        if not attr_name.startswith('_'):
+                            try:
+                                attr_value = getattr(obj, attr_name)
+                                if isinstance(attr_value, (str, int, float, bool, type(None))):
+                                    result[attr_name] = attr_value
+                                elif hasattr(attr_value, 'name'):  # Para enums como CodeCategory
+                                    result[attr_name] = attr_value.name
+                                elif hasattr(attr_value, '__str__'):
+                                    result[attr_name] = str(attr_value)
+                            except:
+                                continue
+                    return result
+                elif hasattr(obj, 'name'):  # Para enums
+                    return obj.name
+                else:
+                    return str(obj)
+            
+            serializable_categorized = {}
+            for category, chunks in categorized.items():
+                serializable_categorized[category] = []
+                for chunk in chunks:
+                    serializable_categorized[category].append(serialize_object(chunk))
+            
             return {
-                'categorized': categorized,
-                'summary': summary,
+                'categorized': serializable_categorized,
+                'orphan_summary': summary,  # Cambié 'summary' a 'orphan_summary' para coincidir con el HTML
                 'timestamp': int(time.time())
             }
         except Exception as e:
@@ -117,12 +148,31 @@ class DashboardAPIHandler:
         self.data_provider = data_provider
     
     def handle_summary(self) -> tuple[int, str, str]:
-        """Manejar API de resumen."""
+        """Maneja la solicitud de la API para el resumen."""
         try:
-            summary = self.data_provider.get_summary_data()
+            full_data = self.data_provider.get_summary_data()
+            project_metrics = full_data.get('project_metrics', {})
+            
+            # Formatear los números flotantes para una mejor visualización
+            maintainability = project_metrics.get('maintainability_score', 0)
+            complexity = project_metrics.get('complexity_average', 0)
+            
+            formatted_maintainability = f"{maintainability:.2f}" if isinstance(maintainability, float) else maintainability
+            formatted_complexity = f"{complexity:.2f}" if isinstance(complexity, float) else complexity
+
+            summary = {
+                'total_files': project_metrics.get('total_files', 0),
+                'total_functions': project_metrics.get('total_functions', 0),
+                'total_lines': project_metrics.get('total_lines', 0),
+                'orphan_functions': project_metrics.get('orphan_functions', 0),
+                'maintainability_score': formatted_maintainability,
+                'complexity_average': formatted_complexity,
+                'last_update': full_data.get('timestamp', 'N/A')
+            }
             return 200, 'application/json', json.dumps(summary)
+            
         except Exception as e:
-            error_data = {'error': f'Error obteniendo resumen: {e}'}
+            error_data = {'error': f'Error procesando el resumen: {e}'}
             return 500, 'application/json', json.dumps(error_data)
     
     def handle_smart_analysis(self) -> tuple[int, str, str]:
@@ -218,14 +268,103 @@ class DashboardAPIHandler:
         except Exception as e:
             error_data = {'error': f'Error analizando God class: {e}'}
             return 500, 'application/json', json.dumps(error_data)
+    
+    def handle_category_breakdown(self) -> tuple[int, str, str]:
+        """Servir desglose por categoría."""
+        try:
+            from pathlib import Path
+            if not self.data_provider.metrics_file.exists():
+                error_data = {'error': 'Archivo de métricas no encontrado'}
+                return 404, 'application/json', json.dumps(error_data)
+            
+            with open(self.data_provider.metrics_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            file_metrics = data.get('file_metrics', {})
+            
+            categories = {
+                'production': {'total': 0, 'functions': 0, 'classes': 0, 'complexity': []},
+                'test': {'total': 0, 'functions': 0, 'classes': 0, 'complexity': []},
+                'tooling': {'total': 0, 'functions': 0, 'classes': 0, 'complexity': []},
+                'scripts': {'total': 0, 'functions': 0, 'classes': 0, 'complexity': []}
+            }
+            
+            # Debug: contador para verificar cuántos archivos se procesan
+            processed_files = 0
+            
+            # Lógica de categorización
+            for file_path, metrics in file_metrics.items():
+                processed_files += 1
+                
+                # Convertir path absoluto a relativo usando Path
+                try:
+                    path_obj = Path(file_path)
+                    project_root_obj = Path(self.data_provider.project_root).absolute()
+                    relative_path = str(path_obj.relative_to(project_root_obj))
+                except ValueError:
+                    # Si no se puede hacer relativo, usar el path original
+                    relative_path = file_path
+                
+                path_lower = relative_path.lower()
+                category = None
+                
+                # 1. Código de Producción (src y refactored_assetplan)
+                if path_lower.startswith('src/') or path_lower.startswith('refactored_assetplan/'):
+                    category = 'production'
+                
+                # 2. Scripts (carpeta scripts y archivos .py en la raíz)
+                elif path_lower.startswith('scripts/') or (not '/' in path_lower and path_lower.endswith('.py')):
+                    category = 'scripts'
+                
+                # 3. Tests
+                elif path_lower.startswith('tests/'):
+                    category = 'test'
+
+                # 4. Herramientas
+                elif path_lower.startswith('tools/'):
+                    category = 'tooling'
+
+                # Si se encontró una categoría, agregar las métricas
+                if category:
+                    categories[category]['total'] += 1
+                    categories[category]['functions'] += metrics.get('functions_count', 0)
+                    categories[category]['classes'] += metrics.get('classes_count', 0)
+                    categories[category]['complexity'].append(metrics.get('complexity_score', 0))
+            
+            # Calcular los promedios de complejidad
+            for cat_name, cat_data in categories.items():
+                complexities = cat_data['complexity']
+                if complexities:
+                    cat_data['avg_complexity'] = sum(complexities) / len(complexities)
+                else:
+                    cat_data['avg_complexity'] = 0
+                # Limpiar la lista de complejidades para el JSON
+                del cat_data['complexity']
+            
+            # Debug: eliminar después de probar
+            # categories['_debug'] = {
+            #     'processed_files': processed_files,
+            #     'project_root': str(self.data_provider.project_root)
+            # }
+            
+            return 200, 'application/json', json.dumps(categories)
+            
+        except Exception as e:
+            error_data = {'error': f'Error cargando categorías: {e}'}
+            return 500, 'application/json', json.dumps(error_data)
+
+# Global instances to avoid re-initialization on each request
+_project_root = Path(__file__).parent.parent.parent  # Ir a la raíz del proyecto
+_data_provider = DashboardDataProvider(_project_root)
+_api_handler = DashboardAPIHandler(_data_provider)
 
 class CategorizedDashboardHandler(BaseHTTPRequestHandler):
     """Handler HTTP para dashboard categorizado (refactorizado)."""
     
     def __init__(self, *args, **kwargs):
-        self.project_root = Path(__file__).parent.parent
-        self.data_provider = DashboardDataProvider(self.project_root)
-        self.api_handler = DashboardAPIHandler(self.data_provider)
+        self.project_root = _project_root
+        self.data_provider = _data_provider
+        self.api_handler = _api_handler
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -243,7 +382,8 @@ class CategorizedDashboardHandler(BaseHTTPRequestHandler):
             status, content_type, content = self.api_handler.handle_smart_analysis()
             self._send_response(status, content_type, content)
         elif path == '/api/category-breakdown':
-            self.serve_category_breakdown()
+            status, content_type, content = self.api_handler.handle_category_breakdown()
+            self._send_response(status, content_type, content)
         elif path == '/api/orphan-analysis':
             self.serve_orphan_analysis()
         elif path == '/api/ask-code':
