@@ -63,6 +63,14 @@ class ScraperManager:
         self.is_running = False
         self.current_operation: Optional[str] = None
         self.start_time: Optional[datetime] = None
+
+    def __enter__(self):
+        """Enter context: return self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Exit context: stop scraper and clean up."""
+        self.stop()
         
     def _setup_components(self) -> None:
         """Set up all scraper components."""

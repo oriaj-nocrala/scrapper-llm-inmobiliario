@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 # Add src to Python path
-sys.path.insert(0, str(Path(__file__).parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.utils.config import settings
 

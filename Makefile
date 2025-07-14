@@ -65,30 +65,30 @@ setup:
 	source env/bin/activate && pip install -r requirements.txt
 	@echo "Setup complete! Activate with: source env/bin/activate"
 
-# Install dependencies (assumes venv is already activated)
+# Install dependencies
 install:
-	pip install --upgrade pip
-	pip install -r requirements.txt
+	source env/bin/activate && pip install --upgrade pip
+	source env/bin/activate && pip install -r requirements.txt
 
 # Run the scraper (legacy)
 scrape:
 	@echo "Starting property scraper..."
-	python3 -m src.scraper.professional_scraper --quick --max-properties 10
+	source env/bin/activate && python3 -m src.scraper.professional_scraper --quick --max-properties 10
 
 # Run the professional scraper (recommended)
 scrape-pro:
 	@echo "Starting professional scraper..."
-	python3 -m src.scraper.professional_scraper
+	source env/bin/activate && python3 -m src.scraper.professional_scraper
 
 # Quick scraping (10 properties, fast mode)
 scrape-quick:
 	@echo "Quick scraping mode..."
-	python3 -m src.scraper.professional_scraper --quick --max-properties 10
+	source env/bin/activate && python3 -m src.scraper.professional_scraper --quick --max-properties 10
 
 # Comprehensive scraping (50 properties, full features)
 scrape-full:
 	@echo "Comprehensive scraping mode..."
-	python3 -m src.scraper.professional_scraper --comprehensive --max-properties 50
+	source env/bin/activate && python3 -m src.scraper.professional_scraper --comprehensive --max-properties 50
 
 # Run all tests
 test:

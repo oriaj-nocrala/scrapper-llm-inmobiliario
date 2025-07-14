@@ -337,6 +337,20 @@ class LoggingContext:
         self.logger = logger
         self.context = context
         self.original_extra = None
+
+    def __enter__(self):
+        self.logger.debug("Entering context", extra=self.context)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type:
+            self.logger.error("Exception in context", extra={
+                **self.context,
+                "error_type": exc_type.__name__,
+                "error_message": str(exc_val),
+            })
+        else:
+            self.logger.debug("Exiting context", extra=self.context)
     
 class LoggingMixin:
     """Mixin class for adding logging capabilities."""

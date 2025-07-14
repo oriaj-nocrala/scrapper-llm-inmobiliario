@@ -31,7 +31,7 @@ class AssetPlanExtractorV2:
     Implementa el flujo completo: busqueda -> edificios -> tipologias -> departamentos
     """
     
-    def __init__(self, driver: WebDriver, base_url: str = "https://www.assetplan.cl"):
+    def __init__(self, driver: WebDriver, base_url: str = "https://www.assetplan.cl", debug_mode=False):
         """Initialize the AssetPlan extractor.
         
         Args:
@@ -41,6 +41,7 @@ class AssetPlanExtractorV2:
         self.driver = driver
         self.base_url = base_url
         self.behavior = HumanBehaviorSimulator(driver)
+        self.debug_mode = debug_mode
         
         # URL correcta según la guía
         self.search_url = f"{base_url}/arriendo/departamento"
