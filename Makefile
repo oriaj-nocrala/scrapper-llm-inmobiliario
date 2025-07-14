@@ -140,25 +140,25 @@ test-quick:
 # Run functional test suite (recommended)
 test-functional:
 	@echo "Running functional test suite..."
-	python3 tests/test_suite_runner.py
+	source env/bin/activate && python3 tests/test_suite_runner.py
 
 # Quick system status check
 test-status:
 	@echo "Checking system status..."
-	python3 tests/test_status.py
+	source env/bin/activate && python3 tests/test_status.py
 
 # Code analysis and refactoring
 analyze-code:
 	@echo "Analyzing code for orphan functions and dead code..."
-	python3 tools/detect_orphan_code.py
+	source env/bin/activate && python3 tools/detect_orphan_code.py
 
 analyze-metrics:
 	@echo "Analyzing code metrics..."
-	python3 tools/code_metrics_analyzer.py
+	source env/bin/activate && python3 tools/code_analysis/code_metrics_analyzer.py
 
 refactor-aggressive:
 	@echo "Running aggressive refactoring..."
-	python3 tools/aggressive_refactor.py
+	source env/bin/activate && python3 tools/aggressive_refactor.py
 
 # Smart CLI Analysis
 analyze-cli:
