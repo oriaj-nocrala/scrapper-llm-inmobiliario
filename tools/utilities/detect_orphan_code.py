@@ -329,49 +329,89 @@ def generate_refactoring_report(
     
     return "\n".join(report)
 
+def calculate_project_stats(analyzers: List['CodeAnalyzer'], python_files: List[Path]) -> Dict:
+    """Calcula estadísticas generales del proyecto."""
+    total_lines = 0
+    total_functions = 0
+    total_imports = 0
 
-# Función de estadísticas auxiliar
+    for analyzer in analyzers:
+        if analyzer:
+            with open(analyzer.filepath, 'r', encoding='utf-8') as f:
+                total_lines += len(f.readlines())
+            total_functions += len(analyzer.functions_defined)
+            total_imports += len(analyzer.imports) + sum(len(v) for v in analyzer.from_imports.values())
+
+    return {
+        'total_files': len(python_files),
+        'total_lines': total_lines,
+        'total_functions': total_functions,
+        'total_imports': total_imports,
+    }
+
+def main():
+    """Ejecutar detección de código huérfano."""
+    project_root = Path(__file__).parent.parent.parent
+
+    print("🧠 ANÁLISIS INTELIGENTE DE CÓDIGO")
+    print("=" * 50)
+
+    print("🔍 Buscando archivos Python...")
+    python_files = find_python_files(project_root)
+    print(f"✅ Encontrados {len(python_files)} archivos Python.")
+    print()
+
+    print("📊 Analizando archivos...")
+    analyzers = []
+    for python_file in python_files:
+        print(f"🔍 {os.path.relpath(python_file, project_root)}")
+        analyzer = analyze_file(python_file)
+        if analyzer:
             analyzers.append(analyzer)
-    
+
     print(f"✅ Analizados {len(analyzers)} archivos exitosamente")
     print()
-    
+
     # Detectar problemas
     print("🔍 Detectando problemas...")
     orphan_functions = detect_orphan_functions(analyzers)
     unused_imports = detect_unused_imports(analyzers)
     unused_variables = detect_unused_variables(analyzers)
-    
+
     # Calcular estadísticas
-    project_stats = calculate_project_stats(analyzers, python_files)
-    
+    project_stats = calculate_project_stats(analyzers, python_files) # This call was unindented
+
     # Generar reporte
     report = generate_refactoring_report(
         orphan_functions, unused_imports, unused_variables, project_stats
     )
-    
+
     # Guardar reporte
     report_file = project_root / "REFACTORING_REPORT.md"
     with open(report_file, 'w', encoding='utf-8') as f:
         f.write(report)
-    
+
     print(f"📄 Reporte guardado en: {report_file}")
     print()
-    
+
     # Mostrar resumen
-    total_issues = len(orphan_functions) + len(unused_imports) + len(unused_variables)
-    
+    total_issues = (
+        sum(len(funcs) for funcs in orphan_functions.values()) +
+        sum(len(imports) for imports in unused_imports.values()) +
+        sum(len(vars) for vars in unused_variables.values())
+    )
+
     if total_issues == 0:
         print("🎉 ¡Excelente! No se encontraron problemas")
     else:
         print(f"⚠️ Encontrados {total_issues} problemas:")
         print(f"   - {len(orphan_functions)} archivos con funciones huérfanas")
-        print(f"   - {len(unused_imports)} archivos con imports no utilizados") 
+        print(f"   - {len(unused_imports)} archivos con imports no utilizados")
         print(f"   - {len(unused_variables)} archivos con variables no utilizadas")
-    
+
     print()
     print("💡 Revisa REFACTORING_REPORT.md para detalles completos")
-    
+
     return total_issues
 
 if __name__ == "__main__":

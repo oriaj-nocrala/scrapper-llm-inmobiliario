@@ -404,23 +404,17 @@ def demo_pipeline():
     
     try:
         # Pipeline rápido
-        print("
-
-🔥 Ejecutando Pipeline RÁPIDO...")
+        print("🔥 Ejecutando Pipeline RÁPIDO...")
         pipeline = create_quick_pipeline(progress_callback=progress_callback)
         stats = pipeline.run_quick_pipeline(max_properties=10)
         
-        print(f"
-
-✅ Pipeline completado en {stats['total_pipeline_duration']:.2f}s")
+        print(f"✅ Pipeline completado en {stats['total_pipeline_duration']:.2f}s")
         print(f"📊 Propiedades scraped: {stats['properties_scraped']}")
         print(f"🤖 Sistema RAG: {'✅ Listo' if stats['success'] else '❌ Error'}")
         
         # Test del sistema RAG
         if pipeline.get_rag_chain():
-            print("
-
-🧪 Probando sistema RAG...")
+            print("🧪 Probando sistema RAG...")
             rag_chain = pipeline.get_rag_chain()
             
             test_question = "¿Qué propiedades hay disponibles?"
@@ -431,14 +425,10 @@ def demo_pipeline():
             print(f"📊 Confianza: {answer.confidence:.2f}")
             print(f"📋 Fuentes: {len(answer.sources)}")
         
-        print(f"
-
-🎉 DEMO completada exitosamente!")
+        print(f"🎉 DEMO completada exitosamente!")
         
     except Exception as e:
-        print(f"
-
-❌ Error en demo: {e}")
+        print(f"❌ Error en demo: {e}")
 
 
 if __name__ == "__main__":

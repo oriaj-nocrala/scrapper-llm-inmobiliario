@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from collections import defaultdict, Counter
 from enum import Enum
 import re
+import sys
+
+sys.path.insert(0, str(Path(__file__).parent.parent / 'utilities'))
+
 
 class CodeCategory(Enum):
     """Categorías de código por importancia."""
@@ -525,7 +529,8 @@ class SmartCodeAnalyzer:
 
 def main():
     """Ejecutar análisis inteligente."""
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent  # Ajustar según la estructura del proyecto
+    print(f"DEBUG: SmartCodeAnalyzer project_root set to: {project_root}") # ADD THIS LINE
     analyzer = SmartCodeAnalyzer(project_root)
     
     # Analizar proyecto

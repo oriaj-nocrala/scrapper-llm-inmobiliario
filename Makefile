@@ -201,25 +201,25 @@ analyze-advanced-save:
 # RAG System for Code Analysis
 setup-code-rag:
 	@echo "Setting up RAG system for code analysis..."
-	pip install sentence-transformers numpy faiss-cpu
+	source env/bin/activate && pip install sentence-transformers numpy faiss-cpu
 
 code-assistant:
 	@echo "Starting interactive code assistant..."
-	source env/bin/activate && python3 tools/code_assistant.py
+	source env/bin/activate && python3 tools/utilities/code_assistant.py
 
 code-insights:
 	@echo "Generating code insights..."
-	source env/bin/activate && python3 tools/code_insights.py
+	source env/bin/activate && python3 tools/code_analysis/code_insights.py
 
 ask-code:
 	@echo "Quick code question..."
-	source env/bin/activate && python3 tools/code_assistant.py --question "$(QUESTION)"
+	source env/bin/activate && python3 tools/utilities/code_assistant.py --question "$(QUESTION)"
 
 
 # Smart Categorized Analysis
 analyze-smart:
 	@echo "Running smart code analysis..."
-	source env/bin/activate && python3 tools/smart_code_analyzer.py
+	source env/bin/activate && python3 tools/code_analysis/smart_code_analyzer.py
 
 dashboard-smart:
 	@echo "Starting smart categorized dashboard..."

@@ -19,6 +19,7 @@ import ast
 sys.path.insert(0, str(Path(__file__).parent.parent / 'code_analysis'))
 sys.path.insert(0, str(Path(__file__).parent.parent / 'data_processing'))
 sys.path.insert(0, str(Path(__file__).parent.parent / 'god_class_refactor'))
+sys.path.insert(0, str(Path(__file__).parent.parent / 'utilities'))
 
 try:
     from smart_code_analyzer import SmartCodeAnalyzer, CodeCategory
@@ -80,7 +81,7 @@ class DashboardDataProvider:
         try:
             with open(self.metrics_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            return data.get('summary', {})
+            return data.get('project_metrics', {})
         except Exception as e:
             print(f"Error cargando métricas: {e}")
             return self._generate_quick_summary()
@@ -494,7 +495,8 @@ def find_free_port(start_port=8090):
 
 def main():
     """Ejecutar servidor categorizado."""
-    project_root = Path(__file__).parent.parent
+    project_root = Path(__file__).parent.parent.parent
+    print(f"DEBUG: Dashboard Server project_root set to: {project_root}") # ADD THIS LINE
     metrics_file = project_root / "CODE_METRICS_REPORT.json"
     
     if not metrics_file.exists():

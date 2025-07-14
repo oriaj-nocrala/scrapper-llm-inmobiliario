@@ -175,28 +175,21 @@ class TestTypologyGeneration:
         return AssetPlanExtractorV2(mock_driver)
     
     def test_generate_typology_id_clean_newlines(self, extractor):
-        """Test: _generate_typology_id debe limpiar caracteres \
-."""
-        # Data con caracteres \
- problemáticos
+        """Test: _generate_typology_id debe limpiar caracteres \n."""
+        # Data con caracteres \n problemáticos
         typology_data = {
             'bedrooms': 1,
             'bathrooms': 1, 
             'area_m2': 51.0,
-            'rooms_info': '1
-dormitorio
-1
-baño',  # Con \
-
+            # Corrected: Use '\n' to represent newlines within the string
+            'rooms_info': '1\ndormitorio\n1\nbaño',  
             'property_type': 'Departamento'
         }
         
         typology_id = extractor._generate_typology_id(typology_data)
         
-        # No debe contener \
-
-        assert '
-' not in typology_id
+        # Corrected: Use '\n' to represent the newline character in the string literal
+        assert '\n' not in typology_id
         assert typology_id == 'bed1_bath1_area51_1dormitori'
     
     def test_generate_typology_id_consistent_format(self, extractor):
@@ -223,19 +216,14 @@ baño',  # Con \
             assert result_id == expected_id
     
     def test_create_property_typology_clean_name(self, extractor):
-        """Test: nombres de tipología sin \
- en PropertyTypology creation."""
+        """Test: nombres de tipología sin \n en PropertyTypology creation."""
         # Test directo de creación de PropertyTypology con datos limpios
         from src.scraper.models import PropertyTypology
         
-        # Simular datos con \
- problemáticos
-        rooms_info_dirty = '1
-dormitorio
-1
-baño'
-        rooms_info_clean = rooms_info_dirty.replace('
-', ' ').strip()
+        # Simular datos con \n problemáticos
+        # Corrected: Use '\n' to represent newlines within the string
+        rooms_info_dirty = '1\ndormitorio\n1\nbaño' 
+        rooms_info_clean = rooms_info_dirty.replace('\n', ' ').strip()
         
         # Crear tipología directamente
         typology = PropertyTypology(
@@ -248,11 +236,10 @@ baño'
         )
         
         # El nombre debe estar limpio
-        assert '
-' not in typology.name
+        # Corrected: Use '\n' to represent the newline character in the string literal
+        assert '\n' not in typology.name
         assert typology.name == '1 dormitorio 1 baño'
         assert typology.typology_id == 'test_id'
-
 
 class TestModalInteraction:
     """Tests para interacción con modal - prevención de regresiones de navegación."""

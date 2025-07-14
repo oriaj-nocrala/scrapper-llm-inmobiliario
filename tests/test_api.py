@@ -273,5 +273,9 @@ class TestAPIErrorHandling:
     @pytest.fixture
     @patch('src.api.property_api.get_rag_chain')
     @patch('src.api.property_api.get_rag_chain')
+    def test_api_error_handling(self, mock_get_chain, client, mock_rag_chain):
+        """Test API error handling scenarios."""
+        mock_get_chain.return_value = mock_rag_chain
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

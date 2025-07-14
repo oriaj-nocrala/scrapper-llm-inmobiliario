@@ -58,22 +58,22 @@ class TestPropertyVectorStore:
     @patch('src.vectorstore.faiss_store.OpenAIEmbeddings')
     @patch('src.vectorstore.faiss_store.FAISS')
     @patch('src.vectorstore.faiss_store.OpenAIEmbeddings')
-class TestPropertyRAGChain:
-    """Test RAG chain functionality."""
-    
-    @pytest.fixture
-    @pytest.fixture
-    def test_rag_chain_initialization(self, mock_vector_store, mock_llm):
-        """Test RAG chain initialization."""
-        rag_chain = PropertyRAGChain(
-            vector_store=mock_vector_store,
-            llm=mock_llm,
-            retrieval_k=5
-        )
-        
-        assert rag_chain.vector_store == mock_vector_store
-        assert rag_chain.llm == mock_llm
-        assert rag_chain.retrieval_k == 5
+    class TestPropertyRAGChain:
+        """Test RAG chain functionality."""
+
+        @pytest.fixture
+        @pytest.fixture
+        def test_rag_chain_initialization(self, mock_vector_store, mock_llm):
+            """Test RAG chain initialization."""
+            rag_chain = PropertyRAGChain(
+                vector_store=mock_vector_store,
+                llm=mock_llm,
+                retrieval_k=5
+            )
+            
+            assert rag_chain.vector_store == mock_vector_store
+            assert rag_chain.llm == mock_llm
+            assert rag_chain.retrieval_k == 5
     
     @patch('src.rag.property_rag_chain.Document')
     def test_ask_question_success(self, mock_document, mock_vector_store, mock_llm):
