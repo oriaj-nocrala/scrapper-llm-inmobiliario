@@ -1,0 +1,226 @@
+name: 🔍 Pull Request Tests
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+    types: [opened, synchronize, reopened]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # TESTS RÁPIDOS PARA PR
+  # ============================================================================
+  pr-quick-tests:
+    name: ⚡ Quick PR Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-xdist flake8 black
+          pip install -r requirements.txt
+
+      - name: 🎨 Check code formatting
+        run: |
+          black --check --diff .
+
+      - name: 🔍 Lint code
+        run: |
+          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+      - name: 🧪 Run unit tests
+        run: |
+          pytest tests/ -v -k "not integration and not functional" --maxfail=3 -x
+
+  # ============================================================================
+  # ANÁLISIS DE CAMBIOS
+  # ============================================================================
+  pr-change-analysis:
+    name: 📊 Change Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 📊 Analyze changed files
+        run: |
+          # Obtener archivos modificados
+          git diff --name-only HEAD^ HEAD > changed_files.txt
+          
+          echo "Files changed in this PR:"
+          cat changed_files.txt
+          
+          # Analizar solo archivos Python modificados
+          python -c "
+          import os
+          changed_files = []
+          with open('changed_files.txt', 'r') as f:
+              for line in f:
+                  file = line.strip()
+                  if file.endswith('.py') and os.path.exists(file):
+                      changed_files.append(file)
+          
+          if changed_files:
+              print('Python files to analyze:')
+              for file in changed_files:
+                  print(f'  - {file}')
+          else:
+              print('No Python files changed.')
+          "
+
+      - name: 🧠 Run God Class analysis on changed files
+        run: |
+          python -c "
+          import os
+          import subprocess
+          
+          changed_files = []
+          with open('changed_files.txt', 'r') as f:
+              for line in f:
+                  file = line.strip()
+                  if file.endswith('.py') and os.path.exists(file) and 'src/' in file:
+                      changed_files.append(file)
+          
+          for file in changed_files:
+              print(f'Analyzing {file}...')
+              try:
+                  result = subprocess.run([
+                      'python', 'tools/god_class_refactor/god_class_refactor_guide.py', 
+                      file, '--quick'
+                  ], capture_output=True, text=True, timeout=60)
+                  if result.returncode == 0:
+                      print(f'✅ {file} - OK')
+                  else:
+                      print(f'⚠️ {file} - Issues found')
+              except subprocess.TimeoutExpired:
+                  print(f'⏱️ {file} - Timeout')
+              except Exception as e:
+                  print(f'❌ {file} - Error: {e}')
+          " || true
+
+  # ============================================================================
+  # TESTS DE DOCKER PARA PR
+  # ============================================================================
+  pr-docker-test:
+    name: 🐳 Docker Build Test
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.changed_files, 'Dockerfile') || contains(github.event.pull_request.changed_files, 'docker-compose')
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🏗️ Test Docker build
+        run: |
+          docker build -t scrapper-llm:pr-test .
+
+      - name: 🧪 Test Docker container startup
+        run: |
+          mkdir -p data logs cache ml-models
+          docker run --rm -d --name scrapper-pr-test \
+            -v $(pwd)/data:/app/data \
+            -v $(pwd)/logs:/app/logs \
+            -v $(pwd)/cache:/app/cache \
+            -v $(pwd)/ml-models:/app/ml-models \
+            scrapper-llm:pr-test
+          
+          sleep 10
+          docker exec scrapper-pr-test /app/docker-entrypoint.sh health
+          docker stop scrapper-pr-test
+
+  # ============================================================================
+  # COMENTARIOS AUTOMÁTICOS EN PR
+  # ============================================================================
+  pr-comment:
+    name: 💬 PR Comment
+    runs-on: ubuntu-latest
+    needs: [pr-quick-tests, pr-change-analysis]
+    if: always()
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 💬 Comment PR results
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && comment.body.includes('🤖 PR Analysis Results')
+            );
+            
+            const testStatus = '${{ needs.pr-quick-tests.result }}';
+            const analysisStatus = '${{ needs.pr-change-analysis.result }}';
+            
+            const statusEmoji = testStatus === 'success' ? '✅' : '❌';
+            const analysisEmoji = analysisStatus === 'success' ? '✅' : '❌';
+            
+            const commentBody = `
+            ## 🤖 PR Analysis Results
+            
+            | Check | Status | Details |
+            |-------|--------|---------|
+            | Quick Tests | ${statusEmoji} ${testStatus} | Unit tests and linting |
+            | Change Analysis | ${analysisEmoji} ${analysisStatus} | Code analysis on modified files |
+            | Docker Build | 🐳 | Build test ${context.eventName === 'pull_request' ? 'completed' : 'skipped'} |
+            
+            ### 📊 Summary
+            - **Python Version**: 3.11
+            - **Test Framework**: pytest
+            - **Linting**: flake8, black
+            - **Security**: bandit (on full pipeline)
+            
+            ### 🔍 Next Steps
+            ${testStatus === 'success' ? 
+              '- ✅ All checks passed! Ready for review.' : 
+              '- ❌ Some checks failed. Please fix issues before merging.'
+            }
+            
+            ---
+            *This comment was automatically generated by GitHub Actions*
+            `;
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody
+              });
+            }

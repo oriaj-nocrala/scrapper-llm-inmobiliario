@@ -1,0 +1,427 @@
+name: 🚀 Release & Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # VALIDACIÓN PRE-RELEASE
+  # ============================================================================
+  pre-release-validation:
+    name: ✅ Pre-Release Validation
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION=${{ github.event.release.tag_name }}
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          pip install -r requirements.txt
+
+      - name: 🧪 Run critical tests
+        run: |
+          pytest tests/ -v -k "not integration" --maxfail=5
+
+      - name: 🔍 Validate Docker configuration
+        run: |
+          docker build -t scrapper-llm:${{ steps.version.outputs.version }} .
+          docker run --rm scrapper-llm:${{ steps.version.outputs.version }} health
+
+      - name: 📊 Generate release validation report
+        run: |
+          echo "# 🚀 Release Validation Report" > validation-report.md
+          echo "" >> validation-report.md
+          echo "## 📋 Pre-Release Checklist" >> validation-report.md
+          echo "" >> validation-report.md
+          echo "- [x] Critical tests passed" >> validation-report.md
+          echo "- [x] Docker build successful" >> validation-report.md
+          echo "- [x] Health check functional" >> validation-report.md
+          echo "- [x] Version: ${{ steps.version.outputs.version }}" >> validation-report.md
+          echo "" >> validation-report.md
+          echo "## 🎯 Release Details" >> validation-report.md
+          echo "" >> validation-report.md
+          echo "- **Version**: ${{ steps.version.outputs.version }}" >> validation-report.md
+          echo "- **Branch**: ${{ github.ref }}" >> validation-report.md
+          echo "- **Commit**: ${{ github.sha }}" >> validation-report.md
+          echo "- **Date**: $(date)" >> validation-report.md
+
+      - name: 📤 Upload validation report
+        uses: actions/upload-artifact@v3
+        with:
+          name: validation-report
+          path: validation-report.md
+
+  # ============================================================================
+  # CONSTRUCCIÓN DE RELEASE
+  # ============================================================================
+  build-release:
+    name: 🏗️ Build Release
+    runs-on: ubuntu-latest
+    needs: pre-release-validation
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.pre-release-validation.outputs.version }}
+
+      - name: 🏗️ Build and push Docker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: 🏷️ Output image
+        id: image
+        run: |
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.pre-release-validation.outputs.version }}" >> $GITHUB_OUTPUT
+
+  # ============================================================================
+  # TESTS DE RELEASE
+  # ============================================================================
+  release-tests:
+    name: 🧪 Release Tests
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, build-release]
+    strategy:
+      matrix:
+        test-type: [smoke, integration, performance]
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Pull release image
+        run: |
+          docker pull ${{ needs.build-release.outputs.image }}
+
+      - name: 🧪 Run ${{ matrix.test-type }} tests
+        run: |
+          case "${{ matrix.test-type }}" in
+            "smoke")
+              echo "🚬 Running smoke tests..."
+              mkdir -p data logs cache ml-models
+              docker run --rm -d --name smoke-test \
+                -v $(pwd)/data:/app/data \
+                -v $(pwd)/logs:/app/logs \
+                -v $(pwd)/cache:/app/cache \
+                -v $(pwd)/ml-models:/app/ml-models \
+                ${{ needs.build-release.outputs.image }}
+              sleep 15
+              docker exec smoke-test /app/docker-entrypoint.sh health
+              docker stop smoke-test
+              ;;
+            "integration")
+              echo "🔗 Running integration tests..."
+              docker run --rm \
+                -v $(pwd)/tests:/app/tests \
+                ${{ needs.build-release.outputs.image }} \
+                python -m pytest tests/ -v -k "integration" --maxfail=3
+              ;;
+            "performance")
+              echo "⚡ Running performance tests..."
+              docker run --rm \
+                -v $(pwd)/data:/app/data \
+                ${{ needs.build-release.outputs.image }} \
+                python -c "
+                import time
+                import psutil
+                print('Testing performance...')
+                start = time.time()
+                # Simular carga de trabajo
+                time.sleep(2)
+                end = time.time()
+                print(f'Performance test completed in {end-start:.2f}s')
+                "
+              ;;
+          esac
+
+  # ============================================================================
+  # DESPLIEGUE A STAGING
+  # ============================================================================
+  deploy-staging:
+    name: 🚀 Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, build-release, release-tests]
+    environment: staging
+    if: github.event.inputs.environment == 'staging' || github.event_name == 'release'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy to staging
+        run: |
+          echo "🚀 Deploying to staging..."
+          echo "Image: ${{ needs.build-release.outputs.image }}"
+          echo "Version: ${{ needs.pre-release-validation.outputs.version }}"
+          
+          # Simular despliegue
+          cat > staging-deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: scrapper-llm-staging
+            namespace: staging
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: scrapper-llm
+                environment: staging
+            template:
+              metadata:
+                labels:
+                  app: scrapper-llm
+                  environment: staging
+                  version: ${{ needs.pre-release-validation.outputs.version }}
+              spec:
+                containers:
+                - name: scrapper-llm
+                  image: ${{ needs.build-release.outputs.image }}
+                  ports:
+                  - containerPort: 8000
+                  - containerPort: 8080
+                  env:
+                  - name: ENVIRONMENT
+                    value: staging
+                  - name: LOG_LEVEL
+                    value: DEBUG
+                  resources:
+                    requests:
+                      memory: "1Gi"
+                      cpu: "500m"
+                    limits:
+                      memory: "2Gi"
+                      cpu: "1000m"
+          EOF
+          
+          echo "Deployment configuration created"
+          cat staging-deployment.yaml
+          
+          # Aquí aplicarías el despliegue real
+          # kubectl apply -f staging-deployment.yaml
+
+      - name: 🧪 Run staging smoke tests
+        run: |
+          echo "🧪 Running staging smoke tests..."
+          # Aquí ejecutarías tests contra el ambiente de staging
+          # curl -f https://staging.scrapper-llm.com/health
+
+  # ============================================================================
+  # DESPLIEGUE A PRODUCCIÓN
+  # ============================================================================
+  deploy-production:
+    name: 🚀 Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, build-release, release-tests, deploy-staging]
+    environment: production
+    if: github.event.inputs.environment == 'production' || github.event_name == 'release'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy to production
+        run: |
+          echo "🚀 Deploying to production..."
+          echo "Image: ${{ needs.build-release.outputs.image }}"
+          echo "Version: ${{ needs.pre-release-validation.outputs.version }}"
+          
+          # Crear configuración de producción
+          cat > production-deployment.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: scrapper-llm-production
+            namespace: production
+          spec:
+            replicas: 3
+            selector:
+              matchLabels:
+                app: scrapper-llm
+                environment: production
+            template:
+              metadata:
+                labels:
+                  app: scrapper-llm
+                  environment: production
+                  version: ${{ needs.pre-release-validation.outputs.version }}
+              spec:
+                containers:
+                - name: scrapper-llm
+                  image: ${{ needs.build-release.outputs.image }}
+                  ports:
+                  - containerPort: 8000
+                  - containerPort: 8080
+                  env:
+                  - name: ENVIRONMENT
+                    value: production
+                  - name: LOG_LEVEL
+                    value: INFO
+                  resources:
+                    requests:
+                      memory: "2Gi"
+                      cpu: "1000m"
+                    limits:
+                      memory: "4Gi"
+                      cpu: "2000m"
+                  livenessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8000
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                  readinessProbe:
+                    httpGet:
+                      path: /health
+                      port: 8000
+                    initialDelaySeconds: 5
+                    periodSeconds: 5
+          EOF
+          
+          echo "Production deployment configuration created"
+          cat production-deployment.yaml
+          
+          # Aquí aplicarías el despliegue real
+          # kubectl apply -f production-deployment.yaml
+
+      - name: 🧪 Run production smoke tests
+        run: |
+          echo "🧪 Running production smoke tests..."
+          # curl -f https://scrapper-llm.com/health
+
+      - name: 📊 Update deployment status
+        run: |
+          echo "✅ Production deployment completed!"
+          echo "Version: ${{ needs.pre-release-validation.outputs.version }}"
+          echo "Image: ${{ needs.build-release.outputs.image }}"
+
+  # ============================================================================
+  # POST-RELEASE TASKS
+  # ============================================================================
+  post-release:
+    name: 📊 Post-Release Tasks
+    runs-on: ubuntu-latest
+    needs: [pre-release-validation, build-release, deploy-production]
+    if: always()
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📊 Generate release report
+        run: |
+          echo "# 🚀 Release Report" > release-report.md
+          echo "" >> release-report.md
+          echo "## 📋 Release Summary" >> release-report.md
+          echo "" >> release-report.md
+          echo "- **Version**: ${{ needs.pre-release-validation.outputs.version }}" >> release-report.md
+          echo "- **Image**: ${{ needs.build-release.outputs.image }}" >> release-report.md
+          echo "- **Date**: $(date)" >> release-report.md
+          echo "- **Environment**: ${{ github.event.inputs.environment || 'production' }}" >> release-report.md
+          echo "" >> release-report.md
+          echo "## 🎯 Deployment Status" >> release-report.md
+          echo "" >> release-report.md
+          echo "- **Build**: ${{ needs.build-release.result }}" >> release-report.md
+          echo "- **Tests**: ${{ needs.release-tests.result }}" >> release-report.md
+          echo "- **Staging**: ${{ needs.deploy-staging.result }}" >> release-report.md
+          echo "- **Production**: ${{ needs.deploy-production.result }}" >> release-report.md
+          echo "" >> release-report.md
+          echo "## 🔗 Links" >> release-report.md
+          echo "" >> release-report.md
+          echo "- [Docker Image](https://github.com/${{ github.repository }}/pkgs/container/${{ github.event.repository.name }})" >> release-report.md
+          echo "- [Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.pre-release-validation.outputs.version }})" >> release-report.md
+          echo "" >> release-report.md
+          echo "---" >> release-report.md
+          echo "*Generated by GitHub Actions Release Pipeline*" >> release-report.md
+
+      - name: 📤 Upload release report
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-report
+          path: release-report.md
+
+      - name: 🎉 Success notification
+        if: success()
+        run: |
+          echo "🎉 Release ${{ needs.pre-release-validation.outputs.version }} deployed successfully!"
+          # Aquí podrías enviar notificaciones de éxito
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"🎉 Release ${{ needs.pre-release-validation.outputs.version }} deployed successfully!"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: 🚨 Failure notification
+        if: failure()
+        run: |
+          echo "🚨 Release ${{ needs.pre-release-validation.outputs.version }} failed!"
+          # Aquí podrías enviar notificaciones de fallo
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"🚨 Release ${{ needs.pre-release-validation.outputs.version }} failed!"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,358 @@
+name: 🌙 Nightly Tests & Analysis
+
+on:
+  schedule:
+    # Ejecutar a las 2:00 AM UTC todos los días
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of tests to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - integration
+          - performance
+          - security
+          - analysis
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # ============================================================================
+  # TESTS COMPLETOS DE INTEGRACIÓN
+  # ============================================================================
+  nightly-integration-tests:
+    name: 🔗 Integration Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'integration' || github.event_name == 'schedule'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pytest-cov pytest-xdist pytest-timeout
+          pip install -r requirements.txt
+
+      - name: 🔗 Run integration tests
+        run: |
+          pytest tests/ -v -k "integration" \
+            --cov=src --cov-report=xml \
+            --timeout=300 \
+            --junit-xml=integration-results.xml
+
+      - name: 📊 Upload test results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: integration-test-results
+          path: |
+            integration-results.xml
+            coverage.xml
+
+  # ============================================================================
+  # TESTS DE RENDIMIENTO
+  # ============================================================================
+  nightly-performance-tests:
+    name: ⚡ Performance Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'performance' || github.event_name == 'schedule'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-benchmark memory-profiler
+          pip install -r requirements.txt
+
+      - name: ⚡ Run performance tests
+        run: |
+          # Test de rendimiento del scraper
+          python -c "
+          import time
+          import psutil
+          import os
+          from src.scraper.professional_scraper import ProfessionalScraper
+          
+          print('🚀 Testing scraper performance...')
+          start_time = time.time()
+          start_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+          
+          # Simular scraping básico
+          try:
+              scraper = ProfessionalScraper()
+              print('✅ Scraper initialized successfully')
+          except Exception as e:
+              print(f'❌ Error initializing scraper: {e}')
+          
+          end_time = time.time()
+          end_memory = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024
+          
+          print(f'⏱️ Initialization time: {end_time - start_time:.2f}s')
+          print(f'💾 Memory usage: {end_memory - start_memory:.2f}MB')
+          "
+
+      - name: 📊 Run God Class analysis performance
+        run: |
+          python -c "
+          import time
+          import os
+          from pathlib import Path
+          
+          print('🧠 Testing God Class analysis performance...')
+          
+          # Encontrar archivos Python grandes
+          python_files = []
+          for file in Path('src').rglob('*.py'):
+              if file.stat().st_size > 1000:  # Archivos > 1KB
+                  python_files.append(file)
+          
+          if python_files:
+              test_file = max(python_files, key=lambda f: f.stat().st_size)
+              print(f'Testing with largest file: {test_file}')
+              
+              start_time = time.time()
+              try:
+                  import subprocess
+                  result = subprocess.run([
+                      'python', 'tools/god_class_refactor/god_class_refactor_guide.py',
+                      str(test_file), '--quick'
+                  ], capture_output=True, text=True, timeout=120)
+                  
+                  end_time = time.time()
+                  print(f'⏱️ Analysis time: {end_time - start_time:.2f}s')
+                  
+                  if result.returncode == 0:
+                      print('✅ Analysis completed successfully')
+                  else:
+                      print(f'⚠️ Analysis completed with warnings')
+                      
+              except subprocess.TimeoutExpired:
+                  print('⏱️ Analysis timed out (>120s)')
+              except Exception as e:
+                  print(f'❌ Analysis error: {e}')
+          else:
+              print('No suitable Python files found for testing')
+          "
+
+  # ============================================================================
+  # ANÁLISIS DE SEGURIDAD PROFUNDO
+  # ============================================================================
+  nightly-security-analysis:
+    name: 🔒 Security Analysis
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'security' || github.event_name == 'schedule'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit[toml] safety semgrep
+          pip install -r requirements.txt
+
+      - name: 🔍 Run bandit security analysis
+        run: |
+          bandit -r src/ -f json -o bandit-nightly-report.json -l
+          bandit -r src/ -f txt
+
+      - name: 🛡️ Run safety check
+        run: |
+          safety check --json --output safety-nightly-report.json
+
+      - name: 🔎 Run semgrep analysis
+        run: |
+          semgrep --config=auto src/ --json --output=semgrep-nightly-report.json
+
+      - name: 📤 Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: nightly-security-reports
+          path: |
+            bandit-nightly-report.json
+            safety-nightly-report.json
+            semgrep-nightly-report.json
+
+  # ============================================================================
+  # ANÁLISIS COMPLETO DE CÓDIGO
+  # ============================================================================
+  nightly-code-analysis:
+    name: 📊 Complete Code Analysis
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'all' || github.event.inputs.test_type == 'analysis' || github.event_name == 'schedule'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🧠 Run complete God Class analysis
+        run: |
+          python tools/god_class_refactor/god_class_refactor_guide.py --scan-project --output nightly-god-class-report.json
+
+      - name: 📈 Run smart code analysis
+        run: |
+          python tools/code_analysis/smart_code_analyzer.py --output nightly-smart-analysis.json
+
+      - name: 📊 Run quality analysis
+        run: |
+          python tools/code_analysis/quality_scorer.py --output nightly-quality-report.json
+
+      - name: 🔍 Run duplicate detection
+        run: |
+          python tools/data_processing/refined_duplicate_detector.py --output nightly-duplicate-report.json
+
+      - name: 📤 Upload analysis reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: nightly-code-analysis-reports
+          path: |
+            nightly-god-class-report.json
+            nightly-smart-analysis.json
+            nightly-quality-report.json
+            nightly-duplicate-report.json
+
+  # ============================================================================
+  # TESTS DE DOCKER COMPLETOS
+  # ============================================================================
+  nightly-docker-tests:
+    name: 🐳 Complete Docker Tests
+    runs-on: ubuntu-latest
+    if: github.event.inputs.test_type == 'all' || github.event_name == 'schedule'
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🏗️ Build Docker image
+        run: |
+          docker build -t scrapper-llm:nightly .
+
+      - name: 🧪 Test all container modes
+        run: |
+          mkdir -p data logs cache ml-models
+          
+          # Test API mode
+          echo "Testing API mode..."
+          docker run --rm -d --name test-api \
+            -v $(pwd)/data:/app/data \
+            -v $(pwd)/logs:/app/logs \
+            scrapper-llm:nightly api &
+          sleep 15
+          docker exec test-api /app/docker-entrypoint.sh health
+          docker stop test-api
+          
+          # Test dashboard mode
+          echo "Testing dashboard mode..."
+          docker run --rm -d --name test-dashboard \
+            -v $(pwd)/data:/app/data \
+            -v $(pwd)/logs:/app/logs \
+            scrapper-llm:nightly dashboard &
+          sleep 10
+          docker stop test-dashboard
+          
+          # Test scraper mode
+          echo "Testing scraper mode..."
+          docker run --rm --name test-scraper \
+            -v $(pwd)/data:/app/data \
+            -v $(pwd)/logs:/app/logs \
+            scrapper-llm:nightly scraper
+
+      - name: 🧪 Test Docker Compose
+        run: |
+          # Test production compose
+          docker-compose up -d
+          sleep 20
+          docker-compose ps
+          docker-compose down
+          
+          # Test development compose
+          docker-compose -f docker-compose.dev.yml up -d
+          sleep 20
+          docker-compose -f docker-compose.dev.yml ps
+          docker-compose -f docker-compose.dev.yml down
+
+  # ============================================================================
+  # REPORTE FINAL Y NOTIFICACIONES
+  # ============================================================================
+  nightly-report:
+    name: 📊 Nightly Report
+    runs-on: ubuntu-latest
+    needs: [nightly-integration-tests, nightly-performance-tests, nightly-security-analysis, nightly-code-analysis, nightly-docker-tests]
+    if: always()
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 📊 Generate nightly report
+        run: |
+          echo "# 🌙 Nightly Test Report - $(date)" > nightly-report.md
+          echo "" >> nightly-report.md
+          echo "## 📈 Test Results" >> nightly-report.md
+          echo "" >> nightly-report.md
+          echo "| Test Suite | Status | Details |" >> nightly-report.md
+          echo "|------------|--------|---------|" >> nightly-report.md
+          echo "| Integration Tests | ${{ needs.nightly-integration-tests.result }} | Full integration testing |" >> nightly-report.md
+          echo "| Performance Tests | ${{ needs.nightly-performance-tests.result }} | Performance benchmarks |" >> nightly-report.md
+          echo "| Security Analysis | ${{ needs.nightly-security-analysis.result }} | Security vulnerability scan |" >> nightly-report.md
+          echo "| Code Analysis | ${{ needs.nightly-code-analysis.result }} | Code quality and structure |" >> nightly-report.md
+          echo "| Docker Tests | ${{ needs.nightly-docker-tests.result }} | Container functionality |" >> nightly-report.md
+          echo "" >> nightly-report.md
+          echo "## 🔍 Summary" >> nightly-report.md
+          echo "" >> nightly-report.md
+          echo "- **Date**: $(date)" >> nightly-report.md
+          echo "- **Branch**: ${{ github.ref }}" >> nightly-report.md
+          echo "- **Commit**: ${{ github.sha }}" >> nightly-report.md
+          echo "- **Python Version**: ${{ env.PYTHON_VERSION }}" >> nightly-report.md
+          echo "" >> nightly-report.md
+          echo "---" >> nightly-report.md
+          echo "*Generated by GitHub Actions Nightly Tests*" >> nightly-report.md
+
+      - name: 📤 Upload nightly report
+        uses: actions/upload-artifact@v3
+        with:
+          name: nightly-report
+          path: nightly-report.md
+
+      - name: 📧 Send notification on failure
+        if: failure()
+        run: |
+          echo "🚨 Nightly tests failed!"
+          echo "Check the workflow logs for details."
+          # Aquí podrías agregar notificaciones a Slack, email, etc.
+          # curl -X POST -H 'Content-type: application/json' \
+          #   --data '{"text":"🚨 Nightly tests failed for scrapper-llm!"}' \
+          #   ${{ secrets.SLACK_WEBHOOK_URL }}

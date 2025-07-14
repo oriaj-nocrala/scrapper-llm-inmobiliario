@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  scrapper-llm-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: scrapper-llm-dev
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+      - "8888:8888"
+      - "5678:5678"  # Puerto para debugging
+    volumes:
+      # Montar código fuente para desarrollo
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./cache:/app/cache
+      - ./ml-models:/app/ml-models
+    environment:
+      - PYTHONPATH=/app
+      - ENVIRONMENT=development
+      - LOG_LEVEL=DEBUG
+      - CHROME_NO_SANDBOX=true
+      - CHROME_HEADLESS=true
+      - WEBDRIVER_CHROME_DRIVER=/usr/local/bin/chromedriver
+      - PYTHONDONTWRITEBYTECODE=1
+    command: ["python", "docker-entrypoint.sh", "api"]
+    stdin_open: true
+    tty: true
+    networks:
+      - scrapper-network
+
+  # Jupyter para desarrollo
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scrapper-llm-jupyter
+    ports:
+      - "8889:8888"
+    volumes:
+      - .:/app
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+    environment:
+      - PYTHONPATH=/app
+      - JUPYTER_ENABLE_LAB=yes
+    command: ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--NotebookApp.token=''", "--NotebookApp.password=''"]
+    networks:
+      - scrapper-network
+
+  # Base de datos para desarrollo (opcional)
+  postgres:
+    image: postgres:15
+    container_name: scrapper-llm-postgres
+    environment:
+      - POSTGRES_DB=scrapper_db
+      - POSTGRES_USER=scrapper_user
+      - POSTGRES_PASSWORD=scrapper_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - scrapper-network
+
+  # Redis para cache (opcional)
+  redis:
+    image: redis:7-alpine
+    container_name: scrapper-llm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - scrapper-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  scrapper-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

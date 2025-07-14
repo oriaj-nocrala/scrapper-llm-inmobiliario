@@ -1,0 +1,195 @@
+name: 📊 Update Badges
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '0 0 * * 0' # Weekly on Sunday
+  workflow_dispatch:
+
+jobs:
+  update-badges:
+    name: 📊 Update README Badges
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-cov
+          pip install -r requirements.txt
+
+      - name: 🧪 Run tests with coverage
+        run: |
+          pytest tests/ --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: 📊 Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: 📊 Generate code quality metrics
+        run: |
+          python -c "
+          import json
+          import subprocess
+          import os
+          
+          # Run quality analysis
+          try:
+              result = subprocess.run([
+                  'python', 'tools/code_analysis/quality_scorer.py', 
+                  '--output', 'quality_metrics.json'
+              ], capture_output=True, text=True)
+              
+              if result.returncode == 0 and os.path.exists('quality_metrics.json'):
+                  with open('quality_metrics.json', 'r') as f:
+                      data = json.load(f)
+                  
+                  # Extract metrics
+                  quality_score = data.get('overall_score', 0)
+                  maintainability = data.get('maintainability_score', 0)
+                  
+                  # Create badge data
+                  badge_data = {
+                      'quality_score': quality_score,
+                      'maintainability': maintainability,
+                      'status': 'passing' if quality_score > 7 else 'failing'
+                  }
+                  
+                  with open('badge_data.json', 'w') as f:
+                      json.dump(badge_data, f)
+                  
+                  print(f'Quality Score: {quality_score}')
+                  print(f'Maintainability: {maintainability}')
+              else:
+                  print('Error running quality analysis')
+          except Exception as e:
+              print(f'Error: {e}')
+          "
+
+      - name: 📊 Generate security badge
+        run: |
+          python -c "
+          import json
+          import subprocess
+          
+          try:
+              # Run security check
+              result = subprocess.run([
+                  'python', '-m', 'pip', 'install', 'safety'
+              ], capture_output=True)
+              
+              result = subprocess.run([
+                  'safety', 'check', '--json'
+              ], capture_output=True, text=True)
+              
+              if result.returncode == 0:
+                  print('Security: No known vulnerabilities')
+                  security_status = 'secure'
+              else:
+                  print('Security: Vulnerabilities found')
+                  security_status = 'vulnerable'
+              
+              with open('security_badge.json', 'w') as f:
+                  json.dump({'status': security_status}, f)
+          except Exception as e:
+              print(f'Security check error: {e}')
+              with open('security_badge.json', 'w') as f:
+                  json.dump({'status': 'unknown'}, f)
+          "
+
+      - name: 📊 Update README with badges
+        run: |
+          python -c "
+          import json
+          import os
+          
+          # Read existing README
+          if os.path.exists('README.md'):
+              with open('README.md', 'r') as f:
+                  content = f.read()
+          else:
+              content = '# Scrapper LLM Inmobiliario\n\n'
+          
+          # Generate badges
+          badges = []
+          badges.append('![CI/CD](https://github.com/${{ github.repository }}/workflows/🚀%20CI/CD%20Pipeline%20-%20Scrapper%20LLM%20Inmobiliario/badge.svg)')
+          badges.append('![Tests](https://github.com/${{ github.repository }}/workflows/🔍%20Pull%20Request%20Tests/badge.svg)')
+          badges.append('![Docker](https://img.shields.io/badge/docker-ready-blue)')
+          badges.append('![Python](https://img.shields.io/badge/python-3.11-blue)')
+          badges.append('![License](https://img.shields.io/badge/license-MIT-green)')
+          
+          # Add code coverage badge if codecov is set up
+          badges.append('![Coverage](https://codecov.io/gh/${{ github.repository }}/branch/main/graph/badge.svg)')
+          
+          # Add quality badges if available
+          if os.path.exists('badge_data.json'):
+              with open('badge_data.json', 'r') as f:
+                  badge_data = json.load(f)
+              
+              quality_color = 'green' if badge_data['quality_score'] > 7 else 'yellow' if badge_data['quality_score'] > 5 else 'red'
+              badges.append(f'![Quality](https://img.shields.io/badge/quality-{badge_data[\"quality_score\"]:.1f}-{quality_color})')
+          
+          # Add security badge if available
+          if os.path.exists('security_badge.json'):
+              with open('security_badge.json', 'r') as f:
+                  security_data = json.load(f)
+              
+              security_color = 'green' if security_data['status'] == 'secure' else 'red'
+              badges.append(f'![Security](https://img.shields.io/badge/security-{security_data[\"status\"]}-{security_color})')
+          
+          # Create badges section
+          badges_section = '## 📊 Status\n\n' + ' '.join(badges) + '\n\n'
+          
+          # Update README
+          if '## 📊 Status' in content:
+              # Replace existing badges section
+              import re
+              content = re.sub(
+                  r'## 📊 Status.*?(?=\n## |\nZ)', 
+                  badges_section, 
+                  content, 
+                  flags=re.DOTALL
+              )
+          else:
+              # Add badges section at the beginning
+              lines = content.split('\n')
+              if lines and lines[0].startswith('# '):
+                  lines.insert(2, badges_section)
+              else:
+                  lines.insert(0, badges_section)
+              content = '\n'.join(lines)
+          
+          with open('README.md', 'w') as f:
+              f.write(content)
+          
+          print('README updated with badges')
+          "
+
+      - name: 📤 Commit badge updates
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            git add README.md
+            git commit -m "📊 Update badges [skip ci]"
+            git push
+            echo "Badges updated"
+          fi
