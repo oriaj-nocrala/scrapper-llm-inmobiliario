@@ -1,6 +1,6 @@
 # Dockerfile para Scrapper LLM Inmobiliario
 # Imagen base con Python y herramientas necesarias
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Información del mantenedor
 LABEL maintainer="Scrapper LLM Team"
